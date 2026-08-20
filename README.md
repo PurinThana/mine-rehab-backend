@@ -13,6 +13,7 @@ cp .env.example .env
 
 npm run db:init     # สร้างฐานข้อมูลและตารางจาก src/db/schema.sql
 npm run db:seed      # ใส่ข้อมูลตัวอย่างจาก src/db/seed.sql (ตรงกับ mock ในหน้าเว็บ)
+npm run db:migrate   # เพิ่มคอลัมน์ใหม่ให้ฐานข้อมูลที่สร้างไว้ก่อนแล้ว (รันซ้ำได้)
 
 npm run create-user -- --name="ผู้ดูแลระบบ" --email=admin@example.com --password="Str0ng!Pass123" --role=admin --site=1
 
@@ -51,6 +52,7 @@ Base URL: `http://localhost:4000/api`
 | POST | `/auth/logout` | staff | จบ session (client ทิ้ง token — JWT ไม่มี state ฝั่งเซิร์ฟเวอร์) |
 | GET | `/auth/me` | staff | ข้อมูลผู้ใช้ปัจจุบัน |
 | POST | `/auth/change-password` | staff | เปลี่ยนรหัสผ่านตัวเอง (ต้องส่ง `currentPassword` + `newPassword`) |
+| POST | `/uploads` | staff | อัปโหลดรูปหรือ PDF ขึ้น Cloudinary คืน URL กลับมา |
 | GET | `/sites` | - | รายชื่อไซต์ทั้งหมด |
 | GET | `/sites/:id` | - | ข้อมูลไซต์ |
 | GET | `/sites/:id/overview` | - | ตัวเลขภาพรวม (StatsOverview.jsx) |
@@ -115,6 +117,35 @@ useEffect(() => {
 อย่าลืมตั้ง `FRONTEND_ORIGIN` ใน `.env` ฝั่ง backend ให้ตรงกับ origin ของหน้าเว็บ (ค่าเริ่มต้น `http://localhost:5173`) ไม่งั้น CORS จะบล็อก
 
 
+
+## ที่เก็บไฟล์รูปและ PDF (Cloudinary)
+
+ตาราง `documents` เก็บแค่ลิงก์ไฟล์ ไม่เก็บตัวไฟล์ และ host ฟรีอย่าง Render มี filesystem
+แบบ ephemeral (ไฟล์หายทุกครั้งที่ deploy) จึงต้องฝากไฟล์ไว้ที่อื่น — เลือก Cloudinary เพราะ
+ฟรีถาวร ไม่ต้องใช้บัตรเครดิต และไม่ปิดบริการเองตอนทิ้งไว้ไม่ใช้
+
+### ตั้งค่าครั้งเดียว
+
+1. สมัครที่ [cloudinary.com](https://cloudinary.com) (ฟรี ไม่ต้องใส่บัตร)
+2. Dashboard → **API Keys** → คัดลอก Cloud name, API Key, API Secret ใส่ในไฟล์ `.env`
+3. **สำคัญ:** Settings → **Security** → ติ๊ก **"Allow delivery of PDF and ZIP files"**
+   บัญชีฟรีบล็อกการส่ง PDF ออกไว้เป็นค่าเริ่มต้น ถ้าไม่ติ๊กข้อนี้ ลิงก์ดาวน์โหลดเอกสาร
+   จะขึ้น error ทั้งที่อัปโหลดขึ้นไปสำเร็จแล้ว
+4. รีสตาร์ต backend
+
+ถ้ายังไม่ตั้งค่า ส่วนอื่นของ API ยังทำงานปกติ — เฉพาะ `POST /uploads` จะตอบ 503
+พร้อมบอกว่าต้องตั้งตัวแปรอะไร และหน้าแอดมินยังวาง URL ไฟล์เองได้เหมือนเดิม
+
+### รายละเอียดการทำงาน
+
+- ไฟล์ไม่แตะดิสก์เลย — multer เก็บใน memory แล้ว stream ขึ้น Cloudinary ตรงๆ
+- รูปอัปเป็น `resource_type: image` (โฟลเดอร์ `mine-rehab/images`), PDF อัปเป็น `raw`
+  (โฟลเดอร์ `mine-rehab/documents`) เพื่อให้ URL เป็นไฟล์ตรงๆ ดาวน์โหลดได้
+- รับเฉพาะ JPG, PNG, WebP, GIF, AVIF และ PDF ขนาดไม่เกิน `UPLOAD_MAX_FILE_MB` (ค่าเริ่มต้น 10 MB)
+- ต้องล็อกอินก่อนอัปโหลด ไม่งั้นใครก็ยิงไฟล์เข้าบัญชี Cloudinary ของเราได้
+- **การลบข้อมูลในหน้าแอดมินไม่ได้ลบไฟล์บน Cloudinary** ไฟล์ที่ไม่มีใครอ้างถึงจะค้างอยู่
+  โควตาฟรี 25 GB ถือว่าเหลือเฟือสำหรับโครงการขนาดนี้ ถ้าจะให้ลบตามด้วยต้องเก็บ
+  `public_id` เพิ่มในตารางแล้วเรียก destroy API
 ## หมายเหตุการแก้ไขข้อมูล (PUT / DELETE)
 
 - ทุก endpoint `PUT` ยืนยันว่าแถวมีอยู่ก่อนสั่ง `UPDATE` (ดู `src/utils/ensureExists.js`) เพราะ MySQL รายงาน `affectedRows` เป็นจำนวนแถวที่ *ค่าเปลี่ยนจริง* ไม่ใช่แถวที่ match — ถ้าเช็คแค่ `affectedRows` การกดบันทึกโดยไม่แก้อะไรจะได้ 404 ทั้งที่ข้อมูลมีอยู่

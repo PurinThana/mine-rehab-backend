@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS activities (
   activity_type   VARCHAR(50) NOT NULL,
   title           VARCHAR(255) NOT NULL,
   description     TEXT NULL,
+  image_url       VARCHAR(500) NULL,
   activity_date   DATE NOT NULL,
   created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_activities_site FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE,
@@ -134,6 +135,7 @@ CREATE TABLE IF NOT EXISTS news_posts (
   site_id         INT UNSIGNED NOT NULL,
   title           VARCHAR(255) NOT NULL,
   body            TEXT NULL,
+  image_url       VARCHAR(500) NULL,
   published_date  DATE NOT NULL,
   created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_news_site FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE

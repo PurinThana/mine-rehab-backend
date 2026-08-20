@@ -1,6 +1,7 @@
 import { Router } from 'express'
 
 import authRoutes from './auth.routes.js'
+import uploadsRoutes from './uploads.routes.js'
 import sitesRoutes from './sites.routes.js'
 import benchLevelsRoutes from './benchLevels.routes.js'
 import speciesRoutes from './species.routes.js'
@@ -13,6 +14,7 @@ import progressSnapshotsRoutes from './progressSnapshots.routes.js'
 const router = Router()
 
 router.use('/auth', authRoutes)
+router.use('/', uploadsRoutes)
 router.use('/sites', sitesRoutes)
 // These four mix /sites/:siteId/... and /<resource>/:id paths, so they
 // mount at the API root rather than under one fixed prefix.
