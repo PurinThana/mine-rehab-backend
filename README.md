@@ -71,6 +71,7 @@ Base URL: `http://localhost:4000/api`
 | POST | `/plantings` | staff | บันทึก/แก้ไขจำนวนต้นของพันธุ์หนึ่งในระดับชั้นหนึ่ง |
 | DELETE | `/plantings/:id` | staff | ลบข้อมูลการปลูก |
 | GET | `/sites/:siteId/activities?limit=` | - | กิจกรรมล่าสุด (RecentActivities.jsx) |
+| GET | `/activities/:id` | - | กิจกรรมเดียว + ระดับชั้น + ชื่อไซต์ (หน้ารายละเอียด) |
 | POST | `/activities` | staff | เพิ่มกิจกรรม |
 | PUT | `/activities/:id` | staff | แก้ไขกิจกรรม |
 | DELETE | `/activities/:id` | staff | ลบกิจกรรม |

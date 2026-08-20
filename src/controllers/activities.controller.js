@@ -16,6 +16,25 @@ export const listActivities = asyncHandler(async (req, res) => {
   res.json(rows)
 })
 
+// กิจกรรมเดียวสำหรับหน้ารายละเอียด — join ระดับชั้นและชื่อไซต์มาให้ในคำขอเดียว
+// เพื่อให้เปิดลิงก์ตรง (หรือกด refresh) ได้โดยไม่ต้องโหลดรายการทั้งหมดมาก่อน
+export const getActivity = asyncHandler(async (req, res) => {
+  const [rows] = await pool.query(
+    `SELECT a.id, a.site_id, a.bench_level_id, a.activity_type, a.title, a.description,
+            a.image_url, a.activity_date, a.created_at,
+            bl.elevation_m AS bench_elevation_m,
+            s.name AS site_name
+       FROM activities a
+       LEFT JOIN bench_levels bl ON bl.id = a.bench_level_id
+       LEFT JOIN sites s ON s.id = a.site_id
+      WHERE a.id = :id
+      LIMIT 1`,
+    { id: req.params.id }
+  )
+  if (!rows[0]) throw ApiError.notFound('ไม่พบกิจกรรม')
+  res.json(rows[0])
+})
+
 export const createActivity = asyncHandler(async (req, res) => {
   const { siteId, benchLevelId, activityType, title, description, imageUrl, activityDate } =
     req.body || {}
