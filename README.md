@@ -58,7 +58,7 @@ Base URL: `http://localhost:4000/api`
 | GET | `/sites/:id/overview` | - | ตัวเลขภาพรวม (StatsOverview.jsx) |
 | POST | `/sites` | admin | สร้างไซต์ใหม่ |
 | PUT | `/sites/:id` | staff | แก้ไขไซต์ |
-| GET | `/sites/:siteId/bench-levels` | - | รายการระดับชั้นทั้งหมด (BenchSummary.jsx) |
+| GET | `/sites/:siteId/bench-levels` | - | รายการระดับชั้นทั้งหมด + `total_trees` ต่อระดับชั้น (BenchSummary.jsx) |
 | GET | `/bench-levels/:id` | - | ระดับชั้นเดียว + รายละเอียดการปลูก |
 | POST | `/bench-levels` | staff | เพิ่มระดับชั้น |
 | PUT | `/bench-levels/:id` | staff | แก้ไขระดับชั้น (พื้นที่ / สถานะ) |
