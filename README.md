@@ -1,0 +1,131 @@
+# Backend — ศูนย์ข้อมูลการฟื้นฟูเหมือง
+
+Express + MySQL API สำหรับ [mine-rehab-landing](../mine-rehab-landing) ออกแบบตามหลัก:
+**อ่านข้อมูล (GET) เปิดสาธารณะทั้งหมด — เขียนข้อมูล (POST/PUT/DELETE) ต้องล็อกอินเป็น กพร.**
+ตรงกับปุ่ม "สำหรับ กพร." บนหน้าเว็บ
+
+## เริ่มใช้งาน
+
+```bash
+npm install
+cp .env.example .env
+# แก้ .env: ใส่ DB_USER, DB_PASSWORD, DB_NAME, JWT_SECRET ของจริง
+
+npm run db:init     # สร้างฐานข้อมูลและตารางจาก src/db/schema.sql
+npm run db:seed      # ใส่ข้อมูลตัวอย่างจาก src/db/seed.sql (ตรงกับ mock ในหน้าเว็บ)
+
+npm run create-user -- --name="ผู้ดูแลระบบ" --email=admin@example.com --password="Str0ng!Pass123" --role=admin --site=1
+
+npm run dev          # http://localhost:4000 (auto-restart on save)
+```
+
+ตรวจสอบว่า API พร้อมใช้งาน: `curl http://localhost:4000/health`
+
+## โครงสร้างฐานข้อมูล
+
+```
+sites ──< bench_levels ──< plantings >── species
+  │            │
+  │            └──< activities
+  ├──< documents
+  ├──< news_posts
+  ├──< progress_snapshots
+  └──< users
+```
+
+**ทำไมแยกแบบนี้:**
+- `bench_levels.status` (`planted` / `not_planted`) คือค่าที่ตารางสรุปบนหน้าเว็บใช้กรองโดยตรง ส่วน `plantings` เก็บรายละเอียดจำนวนต้นแยกตามพันธุ์ — สอง concept นี้แยกกันตั้งใจ เพราะบางครั้งอยากรู้ "ปลูกแล้วกี่ระดับ" เร็วๆ โดยไม่ต้อง join
+- `plantings` เป็นตารางกลางระหว่าง `bench_levels` กับ `species` (many-to-many) เพราะพันธุ์เดียวกันใช้ปลูกได้หลายระดับชั้น
+- `progress_snapshots` เป็นตารางเดียวที่เก็บ "ประวัติ" — ตารางอื่นเก็บแค่สถานะปัจจุบัน ถ้าไม่มีตารางนี้จะย้อนดูความคืบหน้าเดือนก่อนๆ ไม่ได้เลย ควรตั้ง cron รายเดือนให้เรียก `POST /api/sites/:siteId/progress-snapshots` อัตโนมัติ
+- ตัวเลขภาพรวม (83%, 3,747 ตร.ม., 3,123 ต้น) **ไม่มีคอลัมน์เก็บโดยตรง** — คำนวณสดจาก view `v_site_overview` และ `v_species_totals` เสมอ กันไม่ให้ตัวเลขเพี้ยนไปจากข้อมูลจริง
+
+> ข้อมูลตัวอย่างใน `seed.sql` คำนวณผ่าน view แล้วจะได้ตัวเลขไม่ตรงกับที่เคย hardcode ไว้ในหน้าเว็บ mock เดิม (เช่น coverage ~64% แทนที่จะเป็น 83%) เพราะตอนนี้เป็นข้อมูลจริงที่คำนวณจากฐานข้อมูล ไม่ใช่ตัวเลขที่ตั้งไว้ลอยๆ — ปรับข้อมูลใน `seed.sql` หรือผ่าน API ได้ตามต้องการ
+
+## Endpoints
+
+Base URL: `http://localhost:4000/api`
+
+| Method | Path | Auth | คำอธิบาย |
+|---|---|---|---|
+| POST | `/auth/login` | - | เข้าสู่ระบบ คืน JWT + `expiresAt` (unix seconds) |
+| POST | `/auth/logout` | staff | จบ session (client ทิ้ง token — JWT ไม่มี state ฝั่งเซิร์ฟเวอร์) |
+| GET | `/auth/me` | staff | ข้อมูลผู้ใช้ปัจจุบัน |
+| POST | `/auth/change-password` | staff | เปลี่ยนรหัสผ่านตัวเอง (ต้องส่ง `currentPassword` + `newPassword`) |
+| GET | `/sites` | - | รายชื่อไซต์ทั้งหมด |
+| GET | `/sites/:id` | - | ข้อมูลไซต์ |
+| GET | `/sites/:id/overview` | - | ตัวเลขภาพรวม (StatsOverview.jsx) |
+| POST | `/sites` | admin | สร้างไซต์ใหม่ |
+| PUT | `/sites/:id` | staff | แก้ไขไซต์ |
+| GET | `/sites/:siteId/bench-levels` | - | รายการระดับชั้นทั้งหมด (BenchSummary.jsx) |
+| GET | `/bench-levels/:id` | - | ระดับชั้นเดียว + รายละเอียดการปลูก |
+| POST | `/bench-levels` | staff | เพิ่มระดับชั้น |
+| PUT | `/bench-levels/:id` | staff | แก้ไขระดับชั้น (พื้นที่ / สถานะ) |
+| DELETE | `/bench-levels/:id` | admin | ลบระดับชั้น |
+| GET | `/species` | - | รายชื่อพันธุ์พืชทั้งหมด |
+| GET | `/sites/:siteId/species-totals` | - | จำนวนต้นแยกตามพันธุ์ (FlowerTypes.jsx) |
+| POST | `/species` | staff | เพิ่มพันธุ์พืชใหม่ |
+| PUT | `/species/:id` | staff | แก้ไขพันธุ์พืช |
+| DELETE | `/species/:id` | admin | ลบพันธุ์พืช (409 ถ้ามี plantings อ้างอยู่) |
+| POST | `/plantings` | staff | บันทึก/แก้ไขจำนวนต้นของพันธุ์หนึ่งในระดับชั้นหนึ่ง |
+| DELETE | `/plantings/:id` | staff | ลบข้อมูลการปลูก |
+| GET | `/sites/:siteId/activities?limit=` | - | กิจกรรมล่าสุด (RecentActivities.jsx) |
+| POST | `/activities` | staff | เพิ่มกิจกรรม |
+| PUT | `/activities/:id` | staff | แก้ไขกิจกรรม |
+| DELETE | `/activities/:id` | staff | ลบกิจกรรม |
+| GET | `/sites/:siteId/documents` | - | รายการเอกสารดาวน์โหลด |
+| POST | `/documents` | staff | เพิ่มเอกสาร (metadata — ต้องอัปโหลดไฟล์ไปที่ storage เองก่อน) |
+| PUT | `/documents/:id` | staff | แก้ไขข้อมูลเอกสาร |
+| DELETE | `/documents/:id` | staff | ลบเอกสาร |
+| GET | `/sites/:siteId/news?limit=` | - | ข่าวสารและประกาศ |
+| POST | `/news` | staff | เพิ่มข่าว |
+| PUT | `/news/:id` | staff | แก้ไขข่าว |
+| DELETE | `/news/:id` | staff | ลบข่าว |
+| GET | `/sites/:siteId/progress-snapshots?limit=` | - | ประวัติความคืบหน้า (สำหรับกราฟ) |
+| POST | `/sites/:siteId/progress-snapshots` | staff | บันทึก snapshot จากสถานะปัจจุบัน |
+
+ตัวอย่างการเรียก:
+
+```bash
+# เข้าสู่ระบบ
+curl -X POST http://localhost:4000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"Str0ng!Pass123"}'
+
+# ใช้ token ที่ได้มาแก้ไขสถานะระดับชั้น
+curl -X PUT http://localhost:4000/api/bench-levels/8 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{"status":"planted"}'
+```
+
+## เชื่อมกับหน้าเว็บ (Vite React)
+
+ใน `mine-rehab-landing`, แทนที่ค่าคงที่ในแต่ละ component ด้วย `fetch`, เช่น `StatsOverview.jsx`:
+
+```js
+useEffect(() => {
+  fetch(`${import.meta.env.VITE_API_URL}/sites/1/overview`)
+    .then((r) => r.json())
+    .then(setOverview)
+}, [])
+```
+
+แล้วเพิ่ม `.env` ฝั่ง frontend: `VITE_API_URL=http://localhost:4000/api`
+
+อย่าลืมตั้ง `FRONTEND_ORIGIN` ใน `.env` ฝั่ง backend ให้ตรงกับ origin ของหน้าเว็บ (ค่าเริ่มต้น `http://localhost:5173`) ไม่งั้น CORS จะบล็อก
+
+
+## หมายเหตุการแก้ไขข้อมูล (PUT / DELETE)
+
+- ทุก endpoint `PUT` ยืนยันว่าแถวมีอยู่ก่อนสั่ง `UPDATE` (ดู `src/utils/ensureExists.js`) เพราะ MySQL รายงาน `affectedRows` เป็นจำนวนแถวที่ *ค่าเปลี่ยนจริง* ไม่ใช่แถวที่ match — ถ้าเช็คแค่ `affectedRows` การกดบันทึกโดยไม่แก้อะไรจะได้ 404 ทั้งที่ข้อมูลมีอยู่
+- `DELETE /plantings/:id` จะคืน `bench_levels.status` เป็น `not_planted` ให้อัตโนมัติเมื่อลบรายการปลูกสุดท้ายของระดับชั้นนั้นออก (คู่กับ `POST /plantings` ที่ตั้งเป็น `planted`) ไม่งั้น `coverage_pct` จะนับระดับชั้นที่ไม่มีต้นไม้เหลืออยู่ว่า "ปลูกแล้ว"
+- ฟิลด์ที่ค่า `null` มีความหมาย (เช่น `activities.benchLevelId` = ไม่ผูกกับระดับชั้นใด, `news.body`) แยกจาก "ไม่ได้ส่งมา" ด้วยการเช็ค `hasOwnProperty` — ส่ง `null` มาคือสั่งล้างค่า ไม่ส่งมาเลยคือไม่แตะฟิลด์นั้น
+- ยังไม่มี `DELETE /sites/:id` โดยตั้งใจ เพราะ FK เป็น `ON DELETE CASCADE` ทั้งหมด การลบไซต์เดียวจะล้างข้อมูลทั้งโครงการทิ้ง
+
+## หมายเหตุด้านความปลอดภัย
+
+- รหัสผ่านแฮชด้วย Node `crypto.scrypt` (ในตัว ไม่ต้องพึ่ง native dependency อย่าง bcrypt) — ดู `src/utils/password.js`
+- ทุก query ใช้ parameterized placeholders (`mysql2` named params) ป้องกัน SQL injection อยู่แล้ว — อย่าต่อ string SQL เองเพิ่ม
+- Endpoint GET ทั้งหมดเปิดสาธารณะโดยตั้งใจ (โปร่งใสตามจุดประสงค์เว็บ) — อย่าใส่ auth บน GET เว้นแต่ต้องการเปลี่ยนนโยบาย
+- `POST /auth/login` มีตัวกันเดารหัสผ่าน (`src/middleware/loginRateLimit.js`) — ผิดเกิน `LOGIN_MAX_ATTEMPTS` ครั้งใน `LOGIN_WINDOW_MINUTES` นาที จะได้ 429 นับแยกตาม IP + อีเมล จึงไม่มีใครล็อกบัญชีคนอื่นได้ เก็บใน memory ของ process เดียว ถ้าขยายเป็นหลาย instance ต้องย้ายไป Redis
+- Scripts ใน `scripts/` เปิด `multipleStatements` เฉพาะตอน setup เท่านั้น — pool หลักของแอป (`src/config/db.js`) ปิดไว้เสมอ
