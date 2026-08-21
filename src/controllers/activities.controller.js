@@ -2,6 +2,14 @@ import { pool } from '../config/db.js'
 import { asyncHandler } from '../utils/asyncHandler.js'
 import { ApiError } from '../utils/ApiError.js'
 import { ensureExists } from '../utils/ensureExists.js'
+import { sanitizeRichText } from '../utils/richText.js'
+import {
+  fetchImages,
+  fetchImagesForMany,
+  normalizeImageUrls,
+  replaceImages,
+  withTransaction,
+} from '../utils/postImages.js'
 
 export const listActivities = asyncHandler(async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 20, 100)
@@ -13,7 +21,11 @@ export const listActivities = asyncHandler(async (req, res) => {
      LIMIT :limit`,
     { siteId: req.params.siteId, limit }
   )
-  res.json(rows)
+
+  // แนบรายการรูปมาด้วยในคำขอเดียว (สองคิวรี ไม่ใช่ N+1) เพื่อให้การ์ดบอกได้ว่า
+  // มีรูปกี่รูป โดยไม่ต้องยิงถามรายตัว
+  const imagesById = await fetchImagesForMany('activity', rows.map((r) => r.id))
+  res.json(rows.map((row) => ({ ...row, images: imagesById.get(row.id) || [] })))
 })
 
 // กิจกรรมเดียวสำหรับหน้ารายละเอียด — join ระดับชั้นและชื่อไซต์มาให้ในคำขอเดียว
@@ -32,69 +44,88 @@ export const getActivity = asyncHandler(async (req, res) => {
     { id: req.params.id }
   )
   if (!rows[0]) throw ApiError.notFound('ไม่พบกิจกรรม')
-  res.json(rows[0])
+
+  const images = await fetchImages('activity', rows[0].id)
+  res.json({ ...rows[0], images: images.map((i) => i.image_url) })
 })
 
 export const createActivity = asyncHandler(async (req, res) => {
-  const { siteId, benchLevelId, activityType, title, description, imageUrl, activityDate } =
+  const { siteId, benchLevelId, activityType, title, description, imageUrl, images, activityDate } =
     req.body || {}
   if (!siteId || !activityType || !title || !activityDate) {
     throw ApiError.badRequest('ต้องระบุ siteId, activityType, title, activityDate')
   }
 
-  const [result] = await pool.query(
-    `INSERT INTO activities
-       (site_id, bench_level_id, activity_type, title, description, image_url, activity_date)
-     VALUES (:siteId, :benchLevelId, :activityType, :title, :description, :imageUrl, :activityDate)`,
-    {
-      siteId,
-      benchLevelId: benchLevelId || null,
-      activityType,
-      title,
-      description: description || null,
-      imageUrl: imageUrl || null,
-      activityDate,
-    }
-  )
-  res.status(201).json({ id: result.insertId })
+  const urls = normalizeImageUrls(images)
+  // description เป็น HTML จากตัวแก้ไขในหน้าแอดมิน — ล้างก่อนเก็บเสมอ
+  const safeDescription = sanitizeRichText(description)
+
+  const id = await withTransaction(async (conn) => {
+    const [result] = await conn.query(
+      `INSERT INTO activities
+         (site_id, bench_level_id, activity_type, title, description, image_url, activity_date)
+       VALUES (:siteId, :benchLevelId, :activityType, :title, :description, :imageUrl, :activityDate)`,
+      {
+        siteId,
+        benchLevelId: benchLevelId || null,
+        activityType,
+        title,
+        description: safeDescription,
+        // ถ้าส่ง images มา รูปปกจะถูกตั้งจากรูปแรกใน replaceImages
+        imageUrl: urls?.length ? urls[0] : imageUrl || null,
+        activityDate,
+      }
+    )
+    if (urls) await replaceImages(conn, 'activity', result.insertId, urls)
+    return result.insertId
+  })
+
+  res.status(201).json({ id })
 })
 
 export const updateActivity = asyncHandler(async (req, res) => {
-  const { benchLevelId, activityType, title, description, imageUrl, activityDate } = req.body || {}
+  const { benchLevelId, activityType, title, description, imageUrl, images, activityDate } =
+    req.body || {}
 
   await ensureExists('SELECT id FROM activities WHERE id = :id', { id: req.params.id }, 'ไม่พบกิจกรรม')
 
-  // benchLevelId ต้องแยกจาก COALESCE เพราะ null คือค่าที่ตั้งใจได้
-  // ("ไม่ผูกกับระดับชั้นไหน") ไม่ใช่ "ไม่ได้ส่งมา" — ใช้ธงบอกว่าจะแตะฟิลด์นี้ไหม
-  const touchBench = Object.prototype.hasOwnProperty.call(req.body || {}, 'benchLevelId')
+  const urls = normalizeImageUrls(images)
+  const has = (key) => Object.prototype.hasOwnProperty.call(req.body || {}, key)
 
-  await pool.query(
-    `UPDATE activities SET
-       bench_level_id = IF(:touchBench, :benchLevelId, bench_level_id),
-       activity_type = COALESCE(:activityType, activity_type),
-       title = COALESCE(:title, title),
-       description = IF(:touchDescription, :description, description),
-       image_url = IF(:touchImage, :imageUrl, image_url),
-       activity_date = COALESCE(:activityDate, activity_date)
-     WHERE id = :id`,
-    {
-      id: req.params.id,
-      touchBench: touchBench ? 1 : 0,
-      benchLevelId: benchLevelId || null,
-      activityType: activityType ?? null,
-      title: title ?? null,
-      touchDescription: Object.prototype.hasOwnProperty.call(req.body || {}, 'description') ? 1 : 0,
-      description: description || null,
-      // ส่ง imageUrl: null มาคือ "ลบรูปออก" ไม่ส่งมาเลยคือ "ไม่แตะรูปเดิม"
-      touchImage: Object.prototype.hasOwnProperty.call(req.body || {}, 'imageUrl') ? 1 : 0,
-      imageUrl: imageUrl || null,
-      activityDate: activityDate ?? null,
-    }
-  )
+  await withTransaction(async (conn) => {
+    await conn.query(
+      `UPDATE activities SET
+         bench_level_id = IF(:touchBench, :benchLevelId, bench_level_id),
+         activity_type = COALESCE(:activityType, activity_type),
+         title = COALESCE(:title, title),
+         description = IF(:touchDescription, :description, description),
+         image_url = IF(:touchImage, :imageUrl, image_url),
+         activity_date = COALESCE(:activityDate, activity_date)
+       WHERE id = :id`,
+      {
+        id: req.params.id,
+        // benchLevelId ต้องแยกจาก COALESCE เพราะ null คือค่าที่ตั้งใจได้
+        // ("ไม่ผูกกับระดับชั้นไหน") ไม่ใช่ "ไม่ได้ส่งมา"
+        touchBench: has('benchLevelId') ? 1 : 0,
+        benchLevelId: benchLevelId || null,
+        activityType: activityType ?? null,
+        title: title ?? null,
+        touchDescription: has('description') ? 1 : 0,
+        description: sanitizeRichText(description),
+        touchImage: has('imageUrl') ? 1 : 0,
+        imageUrl: imageUrl || null,
+        activityDate: activityDate ?? null,
+      }
+    )
+    // replaceImages ตั้ง image_url ให้เป็นรูปแรกเสมอ จึงทำหลัง UPDATE ด้านบน
+    if (urls) await replaceImages(conn, 'activity', req.params.id, urls)
+  })
+
   res.json({ updated: true })
 })
 
 export const deleteActivity = asyncHandler(async (req, res) => {
+  // post_images ผูก FK แบบ ON DELETE CASCADE จึงหายไปพร้อมกันเอง
   const [result] = await pool.query('DELETE FROM activities WHERE id = :id', { id: req.params.id })
   if (result.affectedRows === 0) throw ApiError.notFound('ไม่พบกิจกรรม')
   res.status(204).send()

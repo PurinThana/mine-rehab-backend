@@ -144,6 +144,35 @@ CREATE TABLE IF NOT EXISTS news_posts (
 CREATE INDEX idx_news_site_date ON news_posts(site_id, published_date DESC);
 
 -- ---------------------------------------------------------------------
+-- post_images: รูปภาพหลายรูปของกิจกรรมหรือข่าวหนึ่งรายการ (แสดงเป็น carousel)
+--
+-- ใช้ตารางเดียวสองเจ้าของด้วย FK ที่เป็น NULL ได้ทั้งคู่ แล้วบังคับด้วย CHECK
+-- ว่าต้องมีเจ้าของเพียงหนึ่งเดียว — ได้ ON DELETE CASCADE จริงทั้งสองทาง
+-- (ถ้าใช้ owner_type/owner_id แบบ polymorphic จะเสีย FK ไป)
+--
+-- คอลัมน์ image_url ในตารางแม่ยังอยู่ ใช้เป็น "รูปปก" ให้การ์ดในหน้ารายการ
+-- ดึงได้โดยไม่ต้อง join — ระบบตั้งค่าให้เท่ากับรูปแรกทุกครั้งที่บันทึก
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS post_images (
+  id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  activity_id   INT UNSIGNED NULL,
+  news_post_id  INT UNSIGNED NULL,
+  image_url     VARCHAR(500) NOT NULL,
+  sort_order    SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_post_images_activity FOREIGN KEY (activity_id)
+    REFERENCES activities(id) ON DELETE CASCADE,
+  CONSTRAINT fk_post_images_news FOREIGN KEY (news_post_id)
+    REFERENCES news_posts(id) ON DELETE CASCADE,
+  CONSTRAINT chk_post_images_owner CHECK (
+    (activity_id IS NULL) <> (news_post_id IS NULL)
+  )
+) ENGINE=InnoDB;
+
+CREATE INDEX idx_post_images_activity ON post_images(activity_id, sort_order);
+CREATE INDEX idx_post_images_news ON post_images(news_post_id, sort_order);
+
+-- ---------------------------------------------------------------------
 -- progress_snapshots: historical record for "ข้อมูล ณ วันที่ ..." and any
 -- month-over-month chart. Without this table you can only ever ask
 -- "what's the state right now?" — this is what lets you ask "what was

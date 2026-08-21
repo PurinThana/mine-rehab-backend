@@ -27,9 +27,9 @@ npm run dev          # http://localhost:4000 (auto-restart on save)
 ```
 sites ──< bench_levels ──< plantings >── species
   │            │
-  │            └──< activities
+  │            └──< activities >──< post_images
   ├──< documents
-  ├──< news_posts
+  ├──< news_posts >──< post_images
   ├──< progress_snapshots
   └──< users
 ```
@@ -71,7 +71,7 @@ Base URL: `http://localhost:4000/api`
 | POST | `/plantings` | staff | บันทึก/แก้ไขจำนวนต้นของพันธุ์หนึ่งในระดับชั้นหนึ่ง |
 | DELETE | `/plantings/:id` | staff | ลบข้อมูลการปลูก |
 | GET | `/sites/:siteId/activities?limit=` | - | กิจกรรมล่าสุด (RecentActivities.jsx) |
-| GET | `/activities/:id` | - | กิจกรรมเดียว + ระดับชั้น + ชื่อไซต์ (หน้ารายละเอียด) |
+| GET | `/activities/:id` | - | กิจกรรมเดียว + ระดับชั้น + ชื่อไซต์ + รายการรูป |
 | POST | `/activities` | staff | เพิ่มกิจกรรม |
 | PUT | `/activities/:id` | staff | แก้ไขกิจกรรม |
 | DELETE | `/activities/:id` | staff | ลบกิจกรรม |
@@ -79,7 +79,8 @@ Base URL: `http://localhost:4000/api`
 | POST | `/documents` | staff | เพิ่มเอกสาร (metadata — ต้องอัปโหลดไฟล์ไปที่ storage เองก่อน) |
 | PUT | `/documents/:id` | staff | แก้ไขข้อมูลเอกสาร |
 | DELETE | `/documents/:id` | staff | ลบเอกสาร |
-| GET | `/sites/:siteId/news?limit=` | - | ข่าวสารและประกาศ |
+| GET | `/sites/:siteId/news?limit=` | - | ข่าวสารและประกาศ (มี `images` ด้วย) |
+| GET | `/news/:id` | - | ข่าวเดียว + รายการรูป (หน้ารายละเอียด) |
 | POST | `/news` | staff | เพิ่มข่าว |
 | PUT | `/news/:id` | staff | แก้ไขข่าว |
 | DELETE | `/news/:id` | staff | ลบข่าว |
@@ -119,6 +120,42 @@ useEffect(() => {
 
 
 
+
+## รูปหลายรูป และเนื้อหาที่จัดรูปแบบได้
+
+### ตาราง post_images
+
+กิจกรรมและข่าวมีรูปได้หลายรูป (สูงสุด 12 รูป) เก็บใน `post_images` ตารางเดียว
+ที่มี FK สองตัวเป็น NULL ได้ทั้งคู่ แล้วบังคับด้วย CHECK ว่าต้องมีเจ้าของ
+เพียงหนึ่งเดียว — ได้ `ON DELETE CASCADE` จริงทั้งสองทาง ซึ่งถ้าใช้
+`owner_type`/`owner_id` แบบ polymorphic จะเสีย FK ไป
+
+**ไม่มี endpoint แยกสำหรับรูป** — ส่ง `images: [url1, url2]` มากับตัวโพสต์
+ตอน POST/PUT แล้วเซิร์ฟเวอร์ลบของเดิมและใส่ชุดใหม่ในทรานแซกชันเดียว
+
+- ลำดับใน array = ลำดับที่แสดงบน carousel (`sort_order`)
+- **รูปแรกกลายเป็น `image_url` (รูปปก) อัตโนมัติ** — การ์ดในหน้ารายการจึงดึงปก
+  ได้โดยไม่ต้อง join และปกไม่มีทางขัดกับแกลเลอรี เพราะมีที่เขียนอยู่ที่เดียว
+- ไม่ส่ง `images` มาเลย = ไม่แตะรูปเดิม / ส่ง `[]` = ลบรูปทั้งหมด
+- URL ซ้ำถูกตัดออกโดยคงลำดับที่ผู้ใช้จัดไว้
+
+### เนื้อหา HTML (activities.description, news_posts.body)
+
+สองคอลัมน์นี้เก็บ HTML จากตัวแก้ไขในหน้าแอดมิน (ตัวหนา สี จัดตำแหน่ง รายการ)
+
+**ล้างด้วย allowlist ที่ฝั่งเซิร์ฟเวอร์ทุกครั้งก่อนเก็บ** (`src/utils/richText.js`)
+เพราะหน้าเว็บสาธารณะแสดงค่านี้ด้วย `dangerouslySetInnerHTML` — ถ้าเก็บ HTML ดิบ
+ใครที่เข้าถึงบัญชีเจ้าหน้าที่ได้จะฝัง `<script>` ให้รันในเบราว์เซอร์ผู้เข้าชมได้
+ล้างตอนเขียนหมายความว่าในฐานข้อมูลไม่เคยมีของอันตรายอยู่เลย
+
+ทดสอบแล้วว่าตัดออก: `<script>`, `onerror`/`onclick`, `href="javascript:"`,
+`position:fixed` และ style อื่นที่ไม่อยู่ใน allowlist
+
+`<font color>` ที่ `execCommand` รุ่นเก่าสร้าง จะถูกแปลงเป็น `<span style="color:…">`
+ไม่ใช่ตัดทิ้ง เพื่อไม่ให้สีที่ผู้ใช้ตั้งไว้หายเงียบๆ ตอนบันทึก
+
+ข้อมูลเก่าที่เป็นข้อความธรรมดายังใช้ได้ตามปกติ ฝั่งหน้าเว็บตรวจว่ามี tag ไหม
+ถ้าไม่มีก็แสดงเป็นข้อความล้วนพร้อมรักษาการเว้นบรรทัด ไม่ต้องแปลงข้อมูลเดิม
 ## ที่เก็บไฟล์รูปและ PDF (Cloudinary)
 
 ตาราง `documents` เก็บแค่ลิงก์ไฟล์ ไม่เก็บตัวไฟล์ และ host ฟรีอย่าง Render มี filesystem
