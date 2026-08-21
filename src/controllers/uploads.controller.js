@@ -14,13 +14,14 @@ const DOC_TYPES = ["application/pdf"];
  *
  * เหตุผล: upload_stream ไม่มีชื่อไฟล์ให้ Cloudinary อ่าน (ไฟล์มาจาก buffer)
  * use_filename จึงไม่มีผล และได้ public_id สุ่มแบบ "file_zhcwr1" ที่ไม่มีนามสกุล
+ * ทำให้ Cloudinary แสดง Format เป็น N/A และไม่รู้ว่าไฟล์อะไร
  *
- * สำหรับ resource_type "raw" นามสกุลต้องอยู่ใน public_id เท่านั้น ถ้าไม่มี
- * Cloudinary จะส่งไฟล์ออกเป็น application/octet-stream พร้อม
- * Content-Disposition: attachment; filename="file_zhcwr1" — ผู้ใช้ดาวน์โหลดไป
- * ได้ไฟล์ไม่มีนามสกุลที่เปิดไม่ได้
+ * นามสกุลของไฟล์ raw (PDF) ต้องอยู่ใน public_id เท่านั้น จึงต่อท้ายไว้
+ * ส่วนรูปภาพไม่ต้องใส่ เพราะ Cloudinary เติมให้เองจากชนิดไฟล์จริง
  *
- * ส่วนรูปภาพไม่ต้องใส่นามสกุล เพราะ Cloudinary เติมให้เองจากชนิดไฟล์จริง
+ * หมายเหตุ: บัญชีฟรีบล็อกการส่ง PDF ผ่าน URL สาธารณะ แต่เราไม่ได้ลิงก์ไปตรงๆ
+ * อยู่แล้ว — หน้าเว็บเรียกผ่าน GET /documents/:id/file ซึ่งดึงไฟล์ด้วย signed URL
+ * ฝั่งเซิร์ฟเวอร์ (ดู documents.controller.js) จึงไม่ติดข้อจำกัดนั้น
  */
 function buildPublicId(originalName, isImage) {
   const safeName = path.basename(String(originalName || ""));

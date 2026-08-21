@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS sites (
   company_name    VARCHAR(255) NOT NULL,
   start_date      DATE NOT NULL,
   end_date        DATE NOT NULL,
+  hero_image_url  VARCHAR(500) NULL,
   created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;

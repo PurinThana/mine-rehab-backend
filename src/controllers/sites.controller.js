@@ -24,21 +24,21 @@ export const getSiteOverview = asyncHandler(async (req, res) => {
 })
 
 export const createSite = asyncHandler(async (req, res) => {
-  const { name, companyName, startDate, endDate } = req.body || {}
+  const { name, companyName, startDate, endDate, heroImageUrl } = req.body || {}
   if (!name || !companyName || !startDate || !endDate) {
     throw ApiError.badRequest('ต้องระบุ name, companyName, startDate, endDate')
   }
 
   const [result] = await pool.query(
-    `INSERT INTO sites (name, company_name, start_date, end_date)
-     VALUES (:name, :companyName, :startDate, :endDate)`,
-    { name, companyName, startDate, endDate }
+    `INSERT INTO sites (name, company_name, start_date, end_date, hero_image_url)
+     VALUES (:name, :companyName, :startDate, :endDate, :heroImageUrl)`,
+    { name, companyName, startDate, endDate, heroImageUrl: heroImageUrl || null }
   )
   res.status(201).json({ id: result.insertId })
 })
 
 export const updateSite = asyncHandler(async (req, res) => {
-  const { name, companyName, startDate, endDate } = req.body || {}
+  const { name, companyName, startDate, endDate, heroImageUrl } = req.body || {}
 
   await ensureExists('SELECT id FROM sites WHERE id = :id', { id: req.params.id }, 'ไม่พบไซต์')
 
@@ -47,7 +47,8 @@ export const updateSite = asyncHandler(async (req, res) => {
        name = COALESCE(:name, name),
        company_name = COALESCE(:companyName, company_name),
        start_date = COALESCE(:startDate, start_date),
-       end_date = COALESCE(:endDate, end_date)
+       end_date = COALESCE(:endDate, end_date),
+       hero_image_url = IF(:touchHero, :heroImageUrl, hero_image_url)
      WHERE id = :id`,
     {
       id: req.params.id,
@@ -55,6 +56,9 @@ export const updateSite = asyncHandler(async (req, res) => {
       companyName: companyName ?? null,
       startDate: startDate ?? null,
       endDate: endDate ?? null,
+      // ส่ง heroImageUrl: null คือ "เอารูปพื้นหลังออก" ไม่ส่งมาเลยคือ "ไม่แตะ"
+      touchHero: Object.prototype.hasOwnProperty.call(req.body || {}, 'heroImageUrl') ? 1 : 0,
+      heroImageUrl: heroImageUrl || null,
     }
   )
   res.json({ updated: true })

@@ -14,6 +14,7 @@ import mysql from "mysql2/promise";
 const COLUMNS = [
   ["activities", "image_url", "VARCHAR(500) NULL AFTER description"],
   ["news_posts", "image_url", "VARCHAR(500) NULL AFTER body"],
+  ["sites", "hero_image_url", "VARCHAR(500) NULL AFTER end_date"],
 ];
 
 // ตารางใหม่ที่เพิ่มหลังจากติดตั้งครั้งแรก — SQL ต้องเหมือนใน schema.sql
