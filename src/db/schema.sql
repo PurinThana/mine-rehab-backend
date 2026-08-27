@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS bench_levels (
   site_id         INT UNSIGNED NOT NULL,
   elevation_m     SMALLINT NOT NULL,
   area_sqm        DECIMAL(10,2) NOT NULL,
-  status          ENUM('planted', 'not_planted') NOT NULL DEFAULT 'not_planted',
+  status          ENUM('planted', 'planted_repair', 'not_planted', 'preparing') NOT NULL DEFAULT 'not_planted',
   sequence_order  SMALLINT NOT NULL,
   created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -203,8 +203,8 @@ SELECT
   s.id                                                            AS site_id,
   s.name                                                          AS site_name,
   COUNT(bl.id)                                                    AS total_benches,
-  SUM(CASE WHEN bl.status = 'planted' THEN 1 ELSE 0 END)          AS planted_benches,
-  SUM(CASE WHEN bl.status <> 'planted' THEN 1 ELSE 0 END)         AS not_planted_benches,
+  SUM(CASE WHEN bl.status IN ('planted','planted_repair') THEN 1 ELSE 0 END)     AS planted_benches,
+  SUM(CASE WHEN bl.status NOT IN ('planted','planted_repair') THEN 1 ELSE 0 END) AS not_planted_benches,
   COALESCE(SUM(bl.area_sqm), 0)                                   AS total_area_sqm,
   COALESCE((
     SELECT SUM(p.tree_count)
@@ -213,7 +213,7 @@ SELECT
     WHERE bl2.site_id = s.id
   ), 0)                                                           AS total_trees,
   ROUND(
-    SUM(CASE WHEN bl.status = 'planted' THEN 1 ELSE 0 END) / NULLIF(COUNT(bl.id), 0) * 100,
+    SUM(CASE WHEN bl.status IN ('planted','planted_repair') THEN 1 ELSE 0 END) / NULLIF(COUNT(bl.id), 0) * 100,
     1
   )                                                                AS coverage_pct
 FROM sites s

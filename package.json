@@ -12,7 +12,8 @@
     "db:init": "node scripts/initDb.js",
     "db:seed": "node scripts/seedData.js",
     "create-user": "node scripts/createUser.js",
-    "db:migrate": "node scripts/migrate.js"
+    "db:migrate": "node scripts/migrate.js",
+    "db:sync-sheet": "node scripts/syncFromSheet.js"
   },
   "dependencies": {
     "cloudinary": "^2.10.1",

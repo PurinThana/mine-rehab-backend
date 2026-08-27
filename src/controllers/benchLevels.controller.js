@@ -3,17 +3,22 @@ import { asyncHandler } from '../utils/asyncHandler.js'
 import { ApiError } from '../utils/ApiError.js'
 import { ensureExists } from '../utils/ensureExists.js'
 
+// ต้องตรงกับ ENUM ของคอลัมน์ bench_levels.status
+const BENCH_STATUSES = ['planted', 'planted_repair', 'not_planted', 'preparing']
+
 export const listBenchLevels = asyncHandler(async (req, res) => {
   // total_trees รวมมาให้ในคำขอเดียว — ตารางสรุปบนหน้าเว็บต้องใช้ทุกแถว
   // ถ้าไม่รวมมา หน้าเว็บต้องยิง /bench-levels/:id ทีละระดับชั้น (11 คำขอ)
   // LEFT JOIN เพื่อให้ระดับชั้นที่ยังไม่ปลูกยังอยู่ในผลลัพธ์ (ได้ 0)
   const [rows] = await pool.query(
-    `SELECT bl.id, bl.site_id, bl.elevation_m, bl.area_sqm, bl.status, bl.sequence_order,
+    `SELECT bl.id, bl.site_id, bl.elevation_m, bl.area_sqm, bl.planned_tree_count,
+            bl.status, bl.sequence_order,
             COALESCE(SUM(p.tree_count), 0) AS total_trees
        FROM bench_levels bl
        LEFT JOIN plantings p ON p.bench_level_id = bl.id
       WHERE bl.site_id = :siteId
-      GROUP BY bl.id, bl.site_id, bl.elevation_m, bl.area_sqm, bl.status, bl.sequence_order
+      GROUP BY bl.id, bl.site_id, bl.elevation_m, bl.area_sqm, bl.planned_tree_count,
+               bl.status, bl.sequence_order
       ORDER BY bl.sequence_order`,
     { siteId: req.params.siteId }
   )
@@ -56,8 +61,8 @@ export const createBenchLevel = asyncHandler(async (req, res) => {
 
 export const updateBenchLevel = asyncHandler(async (req, res) => {
   const { elevationM, areaSqm, status, sequenceOrder } = req.body || {}
-  if (status && !['planted', 'not_planted'].includes(status)) {
-    throw ApiError.badRequest("status ต้องเป็น 'planted' หรือ 'not_planted'")
+  if (status && !BENCH_STATUSES.includes(status)) {
+    throw ApiError.badRequest(`status ต้องเป็นค่าใดค่าหนึ่งใน: ${BENCH_STATUSES.join(', ')}`)
   }
 
   await ensureExists(

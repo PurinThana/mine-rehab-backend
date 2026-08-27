@@ -15,6 +15,50 @@ const COLUMNS = [
   ["activities", "image_url", "VARCHAR(500) NULL AFTER description"],
   ["news_posts", "image_url", "VARCHAR(500) NULL AFTER body"],
   ["sites", "hero_image_url", "VARCHAR(500) NULL AFTER end_date"],
+  ["sites", "location", "VARCHAR(500) NULL AFTER company_name"],
+  ["bench_levels", "planned_tree_count", "INT UNSIGNED NULL AFTER area_sqm"],
+];
+
+// คอลัมน์ที่ต้อง "เปลี่ยนชนิด" ไม่ใช่เพิ่มใหม่
+// [ตาราง, คอลัมน์, ชนิดที่ต้องการ, ข้อความที่ใช้ตรวจว่าแก้ไปแล้ว]
+const COLUMN_TYPES = [
+  [
+    "bench_levels",
+    "status",
+    "ENUM('planted','planted_repair','not_planted','preparing') NOT NULL DEFAULT 'not_planted'",
+    "planted_repair",
+  ],
+];
+
+// view ที่ต้องสร้างทับเมื่อสูตรเปลี่ยน — CREATE OR REPLACE รันซ้ำได้อยู่แล้ว
+const VIEWS = [
+  {
+    name: "v_site_overview",
+    // "ปลูกแล้วรอซ่อม" ถือว่าปลูกแล้ว (ต้นไม้ลงดินไปแล้ว รอซ่อมเฉพาะจุดที่ตาย)
+    // ส่วน "เตรียมพื้นที่" ยังไม่ได้ปลูก — ความคืบหน้าจึงนับสองสถานะแรกเป็นปลูกแล้ว
+    sql: `CREATE OR REPLACE VIEW v_site_overview AS
+      SELECT
+        s.id                                                            AS site_id,
+        s.name                                                          AS site_name,
+        COUNT(bl.id)                                                    AS total_benches,
+        SUM(CASE WHEN bl.status IN ('planted','planted_repair') THEN 1 ELSE 0 END)     AS planted_benches,
+        SUM(CASE WHEN bl.status NOT IN ('planted','planted_repair') THEN 1 ELSE 0 END) AS not_planted_benches,
+        COALESCE(SUM(bl.area_sqm), 0)                                   AS total_area_sqm,
+        COALESCE((
+          SELECT SUM(p.tree_count)
+          FROM plantings p
+          JOIN bench_levels bl2 ON bl2.id = p.bench_level_id
+          WHERE bl2.site_id = s.id
+        ), 0)                                                           AS total_trees,
+        ROUND(
+          SUM(CASE WHEN bl.status IN ('planted','planted_repair') THEN 1 ELSE 0 END)
+            / NULLIF(COUNT(bl.id), 0) * 100,
+          1
+        )                                                                AS coverage_pct
+      FROM sites s
+      LEFT JOIN bench_levels bl ON bl.site_id = s.id
+      GROUP BY s.id, s.name`,
+  },
 ];
 
 // ตารางใหม่ที่เพิ่มหลังจากติดตั้งครั้งแรก — SQL ต้องเหมือนใน schema.sql
@@ -52,6 +96,16 @@ async function columnExists(conn, table, column) {
     { db: process.env.DB_NAME, table, column },
   );
   return rows.length > 0;
+}
+
+async function columnType(conn, table, column) {
+  const [rows] = await conn.query(
+    `SELECT COLUMN_TYPE AS t FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :table AND COLUMN_NAME = :column
+      LIMIT 1`,
+    { db: process.env.DB_NAME, table, column },
+  );
+  return rows[0]?.t || null;
 }
 
 async function tableExists(conn, table) {
@@ -95,6 +149,23 @@ async function main() {
     await conn.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`);
     console.log(`+ เพิ่ม ${table}.${column}`);
     changes += 1;
+  }
+
+  for (const [table, column, wantedType, marker] of COLUMN_TYPES) {
+    const current = await columnType(conn, table, column);
+    if (current && current.includes(marker)) {
+      console.log(`- ข้าม ${table}.${column} (ชนิดถูกต้องแล้ว)`);
+      continue;
+    }
+    await conn.query(`ALTER TABLE \`${table}\` MODIFY COLUMN \`${column}\` ${wantedType}`);
+    console.log(`~ เปลี่ยนชนิด ${table}.${column}`);
+    changes += 1;
+  }
+
+  // view สร้างทับได้เสมอ ไม่ต้องเช็คก่อน
+  for (const view of VIEWS) {
+    await conn.query(view.sql);
+    console.log(`~ อัปเดต view ${view.name}`);
   }
 
   console.log(changes ? `\nปรับโครงฐานข้อมูล ${changes} รายการ ✔` : "\nฐานข้อมูลเป็นเวอร์ชันล่าสุดแล้ว ✔");

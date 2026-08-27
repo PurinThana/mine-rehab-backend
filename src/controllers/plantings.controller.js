@@ -20,9 +20,14 @@ export const upsertPlanting = asyncHandler(async (req, res) => {
     { benchLevelId, speciesId, treeCount, plantedDate: plantedDate || null }
   )
 
-  // A planting record existing is what "status = planted" means for a bench.
+  // มีข้อมูลการปลูกแล้ว = ระดับชั้นนั้นถือว่าปลูกแล้ว
+  //
+  // เลื่อนสถานะเฉพาะระดับชั้นที่ยังไม่ได้ปลูกเท่านั้น — ถ้าเขียนทับทุกกรณี
+  // ระดับชั้นที่เป็น "ปลูกแล้วรอซ่อม" จะถูกลดเหลือ "ปลูกแล้ว" ทันทีที่แก้จำนวนต้น
+  // ทำให้ข้อมูลที่เจ้าหน้าที่ตั้งไว้หายไปเงียบๆ
   await pool.query(
-    `UPDATE bench_levels SET status = 'planted' WHERE id = :benchLevelId`,
+    `UPDATE bench_levels SET status = 'planted'
+      WHERE id = :benchLevelId AND status IN ('not_planted', 'preparing')`,
     { benchLevelId }
   )
 
