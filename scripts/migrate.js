@@ -17,6 +17,11 @@ const COLUMNS = [
   ["sites", "hero_image_url", "VARCHAR(500) NULL AFTER end_date"],
   ["sites", "location", "VARCHAR(500) NULL AFTER company_name"],
   ["bench_levels", "planned_tree_count", "INT UNSIGNED NULL AFTER area_sqm"],
+  // หัวข้อ + คำนำของ section "เรื่องราวการฟื้นฟู" (มีชุดเดียวต่อไซต์)
+  ["sites", "story_title", "VARCHAR(255) NULL AFTER hero_image_url"],
+  ["sites", "story_intro", "TEXT NULL AFTER story_title"],
+  // เจ้าของรูปตัวที่สาม (ดู post_images ใน schema.sql)
+  ["post_images", "story_step_id", "INT UNSIGNED NULL AFTER news_post_id"],
 ];
 
 // คอลัมน์ที่ต้อง "เปลี่ยนชนิด" ไม่ใช่เพิ่มใหม่
@@ -64,26 +69,48 @@ const VIEWS = [
 // ตารางใหม่ที่เพิ่มหลังจากติดตั้งครั้งแรก — SQL ต้องเหมือนใน schema.sql
 const TABLES = [
   {
-    name: "post_images",
-    sql: `CREATE TABLE post_images (
+    // ต้องมาก่อน post_images เพราะ FK ของ post_images อ้างถึงตารางนี้
+    name: "story_steps",
+    sql: `CREATE TABLE story_steps (
       id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-      activity_id   INT UNSIGNED NULL,
-      news_post_id  INT UNSIGNED NULL,
-      image_url     VARCHAR(500) NOT NULL,
+      site_id       INT UNSIGNED NOT NULL,
+      eyebrow       VARCHAR(120) NULL,
+      title         VARCHAR(255) NOT NULL,
+      body          TEXT NULL,
+      image_url     VARCHAR(500) NULL,
       sort_order    SMALLINT UNSIGNED NOT NULL DEFAULT 0,
       created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_story_steps_site FOREIGN KEY (site_id)
+        REFERENCES sites(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB`,
+    indexes: ["CREATE INDEX idx_story_steps_site ON story_steps(site_id, sort_order)"],
+  },
+  {
+    name: "post_images",
+    sql: `CREATE TABLE post_images (
+      id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      activity_id    INT UNSIGNED NULL,
+      news_post_id   INT UNSIGNED NULL,
+      story_step_id  INT UNSIGNED NULL,
+      image_url      VARCHAR(500) NOT NULL,
+      sort_order     SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+      created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT fk_post_images_activity FOREIGN KEY (activity_id)
         REFERENCES activities(id) ON DELETE CASCADE,
       CONSTRAINT fk_post_images_news FOREIGN KEY (news_post_id)
         REFERENCES news_posts(id) ON DELETE CASCADE,
-      -- ต้องมีเจ้าของเพียงหนึ่งเดียว ไม่ใช่ทั้งคู่และไม่ใช่ไม่มีเลย
+      CONSTRAINT fk_post_images_story FOREIGN KEY (story_step_id)
+        REFERENCES story_steps(id) ON DELETE CASCADE,
+      -- ต้องมีเจ้าของเพียงหนึ่งเดียวเท่านั้น (บูลีนใน MariaDB คือ 1/0 บวกกันได้)
       CONSTRAINT chk_post_images_owner CHECK (
-        (activity_id IS NULL) <> (news_post_id IS NULL)
+        (activity_id IS NOT NULL) + (news_post_id IS NOT NULL) + (story_step_id IS NOT NULL) = 1
       )
     ) ENGINE=InnoDB`,
     indexes: [
       "CREATE INDEX idx_post_images_activity ON post_images(activity_id, sort_order)",
       "CREATE INDEX idx_post_images_news ON post_images(news_post_id, sort_order)",
+      "CREATE INDEX idx_post_images_story ON post_images(story_step_id, sort_order)",
     ],
   },
 ];
@@ -159,6 +186,41 @@ async function main() {
     }
     await conn.query(`ALTER TABLE \`${table}\` MODIFY COLUMN \`${column}\` ${wantedType}`);
     console.log(`~ เปลี่ยนชนิด ${table}.${column}`);
+    changes += 1;
+  }
+
+  // post_images เดิมรับเจ้าของได้ 2 แบบ ตอนนี้ต้องรับ story_step_id ด้วย
+  // CHECK กับ FK แก้ในที่นี้เพราะเป็นการ "แทนที่ของเดิม" ไม่ใช่เพิ่มคอลัมน์
+  const [[ownerCheck]] = await conn.query(
+    `SELECT CHECK_CLAUSE AS clause FROM information_schema.CHECK_CONSTRAINTS
+      WHERE CONSTRAINT_SCHEMA = :db AND CONSTRAINT_NAME = 'chk_post_images_owner'
+      LIMIT 1`,
+    { db: process.env.DB_NAME },
+  );
+  if (ownerCheck && !ownerCheck.clause.includes("story_step_id")) {
+    await conn.query("ALTER TABLE post_images DROP CONSTRAINT chk_post_images_owner");
+    await conn.query(
+      `ALTER TABLE post_images ADD CONSTRAINT chk_post_images_owner CHECK (
+         (activity_id IS NOT NULL) + (news_post_id IS NOT NULL) + (story_step_id IS NOT NULL) = 1
+       )`,
+    );
+    console.log("~ ขยาย CHECK ของ post_images ให้รับ story_step_id");
+    changes += 1;
+  }
+
+  const [[storyFk]] = await conn.query(
+    `SELECT 1 AS ok FROM information_schema.TABLE_CONSTRAINTS
+      WHERE CONSTRAINT_SCHEMA = :db AND TABLE_NAME = 'post_images'
+        AND CONSTRAINT_NAME = 'fk_post_images_story' LIMIT 1`,
+    { db: process.env.DB_NAME },
+  );
+  if (!storyFk) {
+    await conn.query(
+      `ALTER TABLE post_images ADD CONSTRAINT fk_post_images_story
+         FOREIGN KEY (story_step_id) REFERENCES story_steps(id) ON DELETE CASCADE`,
+    );
+    await conn.query("CREATE INDEX idx_post_images_story ON post_images(story_step_id, sort_order)");
+    console.log("+ เพิ่ม FK post_images.story_step_id");
     changes += 1;
   }
 

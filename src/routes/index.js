@@ -2,6 +2,7 @@ import { Router } from 'express'
 
 import authRoutes from './auth.routes.js'
 import uploadsRoutes from './uploads.routes.js'
+import storyStepsRoutes from './storySteps.routes.js'
 import sitesRoutes from './sites.routes.js'
 import benchLevelsRoutes from './benchLevels.routes.js'
 import speciesRoutes from './species.routes.js'
@@ -25,5 +26,6 @@ router.use('/', activitiesRoutes)
 router.use('/', documentsRoutes)
 router.use('/', newsRoutes)
 router.use('/', progressSnapshotsRoutes)
+router.use('/', storyStepsRoutes)
 
 export default router

@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS sites (
   start_date      DATE NOT NULL,
   end_date        DATE NOT NULL,
   hero_image_url  VARCHAR(500) NULL,
+  -- หัวข้อและคำนำของ section "ภาพรวมแผนฟื้นฟู" บนหน้าเว็บ (ดูตาราง story_steps)
+  story_title     VARCHAR(255) NULL,
+  story_intro     TEXT NULL,
   created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
@@ -145,9 +148,32 @@ CREATE TABLE IF NOT EXISTS news_posts (
 CREATE INDEX idx_news_site_date ON news_posts(site_id, published_date DESC);
 
 -- ---------------------------------------------------------------------
--- post_images: รูปภาพหลายรูปของกิจกรรมหรือข่าวหนึ่งรายการ (แสดงเป็น carousel)
+-- story_steps: ขั้นตอนในเรื่องราวการฟื้นฟู เรียงจากต้นจนถึง Final Pit
 --
--- ใช้ตารางเดียวสองเจ้าของด้วย FK ที่เป็น NULL ได้ทั้งคู่ แล้วบังคับด้วย CHECK
+-- แยกเป็นตารางของตัวเองแทนที่จะฝังเป็น HTML ก้อนเดียวใน sites เพราะเจ้าหน้าที่
+-- ต้องเพิ่ม/ลบ/สลับลำดับแต่ละขั้นได้จากหน้าแอดมิน และแต่ละขั้นแนบรูปได้หลายรูป
+-- (ใช้ post_images ร่วมกับกิจกรรมและข่าว)
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS story_steps (
+  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  site_id     INT UNSIGNED NOT NULL,
+  eyebrow     VARCHAR(120) NULL,
+  title       VARCHAR(255) NOT NULL,
+  body        TEXT NULL,
+  image_url   VARCHAR(500) NULL,
+  sort_order  SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_story_steps_site FOREIGN KEY (site_id)
+    REFERENCES sites(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE INDEX idx_story_steps_site ON story_steps(site_id, sort_order);
+
+-- ---------------------------------------------------------------------
+-- post_images: รูปภาพหลายรูปของกิจกรรม ข่าว หรือขั้นตอนในเรื่องราว (carousel)
+--
+-- ใช้ตารางเดียวหลายเจ้าของด้วย FK ที่เป็น NULL ได้ทุกตัว แล้วบังคับด้วย CHECK
 -- ว่าต้องมีเจ้าของเพียงหนึ่งเดียว — ได้ ON DELETE CASCADE จริงทั้งสองทาง
 -- (ถ้าใช้ owner_type/owner_id แบบ polymorphic จะเสีย FK ไป)
 --
@@ -158,6 +184,7 @@ CREATE TABLE IF NOT EXISTS post_images (
   id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   activity_id   INT UNSIGNED NULL,
   news_post_id  INT UNSIGNED NULL,
+  story_step_id INT UNSIGNED NULL,
   image_url     VARCHAR(500) NOT NULL,
   sort_order    SMALLINT UNSIGNED NOT NULL DEFAULT 0,
   created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -165,13 +192,18 @@ CREATE TABLE IF NOT EXISTS post_images (
     REFERENCES activities(id) ON DELETE CASCADE,
   CONSTRAINT fk_post_images_news FOREIGN KEY (news_post_id)
     REFERENCES news_posts(id) ON DELETE CASCADE,
+  CONSTRAINT fk_post_images_story FOREIGN KEY (story_step_id)
+    REFERENCES story_steps(id) ON DELETE CASCADE,
+  -- ต้องมีเจ้าของหนึ่งเดียวเสมอ ไม่ขาดและไม่เกิน
   CONSTRAINT chk_post_images_owner CHECK (
-    (activity_id IS NULL) <> (news_post_id IS NULL)
+    (activity_id IS NOT NULL) + (news_post_id IS NOT NULL)
+    + (story_step_id IS NOT NULL) = 1
   )
 ) ENGINE=InnoDB;
 
 CREATE INDEX idx_post_images_activity ON post_images(activity_id, sort_order);
 CREATE INDEX idx_post_images_news ON post_images(news_post_id, sort_order);
+CREATE INDEX idx_post_images_story ON post_images(story_step_id, sort_order);
 
 -- ---------------------------------------------------------------------
 -- progress_snapshots: historical record for "ข้อมูล ณ วันที่ ..." and any

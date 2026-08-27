@@ -17,6 +17,14 @@ const MAX_IMAGES = 12;
 const OWNER_COLUMNS = {
   activity: "activity_id",
   news: "news_post_id",
+  story: "story_step_id",
+};
+
+// ตารางแม่ของแต่ละชนิดเจ้าของ ใช้ตอนตั้งรูปปก
+const PARENT_TABLES = {
+  activity: "activities",
+  news: "news_posts",
+  story: "story_steps",
 };
 
 /** ตรวจและทำความสะอาดรายการ URL ที่รับมาจาก client */
@@ -81,7 +89,7 @@ export async function fetchImagesForMany(ownerKind, ownerIds, conn = pool) {
  */
 export async function replaceImages(conn, ownerKind, ownerId, urls) {
   const column = OWNER_COLUMNS[ownerKind];
-  const parentTable = ownerKind === "activity" ? "activities" : "news_posts";
+  const parentTable = PARENT_TABLES[ownerKind];
 
   await conn.query(`DELETE FROM post_images WHERE ${column} = :ownerId`, { ownerId });
 
