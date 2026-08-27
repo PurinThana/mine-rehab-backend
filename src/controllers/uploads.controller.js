@@ -4,6 +4,7 @@ import path from "node:path";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { cloudinary, isCloudinaryConfigured } from "../config/cloudinary.js";
+import { MAX_IMAGE_MB, MAX_PDF_MB, toBytes } from "../config/uploadLimits.js";
 
 // ชนิดไฟล์ที่รับ — จำกัดไว้เท่าที่หน้าเว็บใช้จริง (รูปการ์ดกิจกรรม/ข่าว และเอกสาร PDF)
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"];
@@ -62,6 +63,18 @@ export const uploadFile = asyncHandler(async (req, res) => {
     );
   }
 
+  // เพดานแยกตามชนิดไฟล์ — multer กันได้แค่ค่าสูงสุดร่วม เพราะตั้งก่อนรู้ชนิดไฟล์
+  // (รูป 12 MB จึงผ่าน multer ที่ตั้งไว้ 50 MB มาถึงตรงนี้ แล้วถูกปฏิเสธที่นี่)
+  const maxMb = isImage ? MAX_IMAGE_MB : MAX_PDF_MB;
+  if (req.file.size > toBytes(maxMb)) {
+    const actualMb = (req.file.size / 1024 / 1024).toFixed(1);
+    throw ApiError.badRequest(
+      isImage
+        ? `รูปภาพใหญ่เกิน ${maxMb} MB (ไฟล์นี้ ${actualMb} MB)`
+        : `ไฟล์ PDF ใหญ่เกิน ${maxMb} MB (ไฟล์นี้ ${actualMb} MB)`,
+    );
+  }
+
   // แยกโฟลเดอร์ให้จัดการง่ายใน Cloudinary
   const folder = isImage ? "mine-rehab/images" : "mine-rehab/documents";
 
@@ -98,6 +111,17 @@ export const uploadFile = asyncHandler(async (req, res) => {
     }
     if (status === 420 || status === 429) {
       throw new ApiError(502, "ใช้โควตา Cloudinary เกินขีดจำกัดชั่วคราว — ลองใหม่อีกครั้งภายหลัง");
+    }
+    // บัญชี Cloudinary มีเพดานขนาดไฟล์ของตัวเอง (แพ็กเกจฟรี = 10 MB ต่อไฟล์)
+    // ซึ่งอาจต่ำกว่า UPLOAD_MAX_PDF_MB ของเรา — บอกให้ตรงจุดว่าติดที่ฝั่งไหน
+    if (status === 400 && /file size too large/i.test(err?.message || "")) {
+      const capMb = Number(String(err.message).match(/Maximum is (\d+)/)?.[1] || 0) / 1024 / 1024;
+      const capText = capMb ? `${capMb} MB` : "เพดานของแพ็กเกจ";
+      throw new ApiError(
+        502,
+        `ไฟล์ผ่านเพดานของเว็บ (${maxMb} MB) แล้ว แต่บัญชี Cloudinary รับได้ไม่เกิน ${capText} ต่อไฟล์ — ` +
+          `ต้องอัปเกรดแพ็กเกจ Cloudinary หรือย้ายไปใช้ที่เก็บไฟล์อื่นที่รับไฟล์ใหญ่กว่านี้`,
+      );
     }
     throw new ApiError(502, `อัปโหลดไปที่ Cloudinary ไม่สำเร็จ: ${err?.message || "ไม่ทราบสาเหตุ"}`);
   }
